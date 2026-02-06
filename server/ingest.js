@@ -86,6 +86,7 @@ async function main() {
     records
   };
 
+  fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
   fs.writeFileSync(OUT_FILE, JSON.stringify(payload, null, 2));
   console.log(`Saved embeddings to ${OUT_FILE}`);
 }
