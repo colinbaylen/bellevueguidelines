@@ -1,0 +1,15 @@
+{
+  "name": "admitting-guidelines-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ingest": "node server/ingest.js",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "openai": "^4.73.1",
+    "pdf-parse": "^1.1.1"
+  }
+}

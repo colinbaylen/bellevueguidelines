@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: bellevue-admitting-guidelines
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_CHAT_MODEL
+        value: gpt-5
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-large
