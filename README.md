@@ -40,6 +40,6 @@ Open `http://localhost:3000`.
 4. Render will use `render.yaml` automatically. Set the `OPENAI_API_KEY` in the Render dashboard.
 
 ## Notes
-- The ingest step reads `bellevue_admitting_guidelines.pdf` in the project root.
+- The ingest step reads `bellevue_admitting_guidelines.pdf` in the project root and fetches the phone directory sheet (override with `CONTACTS_SHEET_URL`).
 - Embeddings are stored in `data/embeddings.json`.
 - If the PDF changes, re-run `npm run ingest`.
