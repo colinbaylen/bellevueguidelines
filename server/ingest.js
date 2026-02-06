@@ -5,6 +5,9 @@ import OpenAI from "openai";
 
 const SOURCE_PDF = path.resolve("./bellevue_admitting_guidelines.pdf");
 const OUT_FILE = path.resolve("./data/embeddings.json");
+const SHEET_URL =
+  process.env.CONTACTS_SHEET_URL ||
+  "https://docs.google.com/spreadsheets/d/1tqfNcfaLdLMZo6UHPH7ePoEFTKhNcp-wIGo1T3-i7fA/export?format=tsv";
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-large";
 const CHUNK_SIZE = 1000; // chars
 const CHUNK_OVERLAP = 150; // chars
@@ -39,6 +42,22 @@ function ensureOpenAIKey() {
   }
 }
 
+async function fetchSheetText() {
+  const res = await fetch(SHEET_URL);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch sheet (${res.status} ${res.statusText}).`);
+  }
+  const raw = await res.text();
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    throw new Error("No data found in the contacts sheet.");
+  }
+  return `Phone directory:\n${lines.join("\n")}`;
+}
+
 async function main() {
   ensureOpenAIKey();
 
@@ -55,7 +74,9 @@ async function main() {
     process.exit(1);
   }
 
-  const chunks = chunkText(text);
+  const sheetText = await fetchSheetText();
+  const combined = [text, sheetText].join("\n\n");
+  const chunks = chunkText(combined);
   const client = new OpenAI();
   const records = [];
 
