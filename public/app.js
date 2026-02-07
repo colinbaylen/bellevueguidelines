@@ -97,6 +97,59 @@ function addAssistantMessage(content) {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+function createAssistantStream({ onFirstChunk, delayMs = 35 } = {}) {
+  let row = null;
+  let bubble = null;
+  let raw = "";
+  let buffer = "";
+  let flushTimer = null;
+  let sawFirstChunk = false;
+
+  const ensureRow = () => {
+    if (row) return;
+    row = document.createElement("div");
+    row.className = "message assistant";
+    bubble = document.createElement("div");
+    bubble.className = "bubble";
+    row.appendChild(bubble);
+    chatEl.appendChild(row);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  };
+
+  const flush = () => {
+    flushTimer = null;
+    if (!buffer) return;
+    if (!sawFirstChunk) {
+      sawFirstChunk = true;
+      if (typeof onFirstChunk === "function") onFirstChunk();
+      ensureRow();
+    }
+    raw += buffer;
+    buffer = "";
+    if (bubble) {
+      bubble.innerHTML = formatAssistantText(raw);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  };
+
+  return {
+    append(delta) {
+      buffer += delta;
+      if (!flushTimer) {
+        flushTimer = setTimeout(flush, delayMs);
+      }
+    },
+    finalize() {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (buffer) flush();
+      messages.push({ role: "assistant", content: raw });
+    }
+  };
+}
+
 function showThinking() {
   if (thinkingEl) return;
   const row = document.createElement("div");
@@ -159,18 +212,44 @@ formEl.addEventListener("submit", async (event) => {
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/plain",
+        "X-Stream": "1"
+      },
       body: JSON.stringify({ messages })
     });
 
     if (!res.ok) {
-      const err = await res.json();
+      let err;
+      try {
+        err = await res.json();
+      } catch {
+        err = { error: await res.text() };
+      }
       hideThinking();
       addMessage("assistant", `Error: ${err.error || "Request failed"}`);
     } else {
-      const data = await res.json();
-      hideThinking();
-      addAssistantMessage(data.answer || "No response.");
+      const stream = createAssistantStream({
+        onFirstChunk: () => hideThinking(),
+        delayMs: 35
+      });
+      if (!res.body) {
+        const text = await res.text();
+        stream.append(text || "No response.");
+        stream.finalize();
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        stream.append(decoder.decode(value, { stream: true }));
+      }
+      stream.finalize();
     }
   } catch (err) {
     hideThinking();

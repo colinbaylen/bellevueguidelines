@@ -93,9 +93,11 @@ body {
 }
 
 .message.user .bubble {
-  background: var(--accent);
+  background: #5f9cf5;
   color: white;
   border-bottom-right-radius: 4px;
+  font-size: 13px;
+  letter-spacing: 0.2px;
 }
 
 .message.assistant .bubble {

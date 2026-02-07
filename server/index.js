@@ -55,6 +55,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
+  const tStart = Date.now();
   try {
     ensureOpenAIKey();
     const { messages } = req.body || {};
@@ -62,7 +63,9 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "messages array required" });
     }
 
+    const tLoadStart = Date.now();
     const db = embeddingsCache || loadEmbeddings();
+    const tLoadMs = Date.now() - tLoadStart;
     if (!db) {
       return res.status(400).json({ error: "Embeddings not found. Run npm run ingest." });
     }
@@ -73,40 +76,85 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "No user message provided." });
     }
 
+    const tEmbedStart = Date.now();
     const embed = await client.embeddings.create({
       model: db.model,
       input: lastUser.content
     });
+    const tEmbedMs = Date.now() - tEmbedStart;
 
+    const tSimStart = Date.now();
     const top = topKSimilar(embed.data[0].embedding, db.records, 5);
+    const tSimMs = Date.now() - tSimStart;
     const context = top
       .map((t, i) => `[Source ${i + 1}]\n${t.text}`)
       .join("\n\n");
 
     const recent = messages.slice(-6);
 
+    const input = [
+      {
+        role: "system",
+        content:
+          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. If the guidelines do not answer the question, say so and ask for clarification. Provide a concise recommendation and include a short Sources section listing the source numbers used."
+      },
+      {
+        role: "user",
+        content: `Guidelines context:\n\n${context}`
+      },
+      ...recent
+    ];
+
+    const tRespStart = Date.now();
+    const wantsStream =
+      req.headers["x-stream"] === "1" ||
+      (typeof req.headers.accept === "string" && req.headers.accept.includes("text/plain"));
+
+    if (wantsStream) {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+      const stream = await client.responses.create({
+        model: CHAT_MODEL,
+        input,
+        stream: true
+      });
+
+      for await (const event of stream) {
+        if (event.type === "response.output_text.delta" && event.delta) {
+          res.write(event.delta);
+        }
+      }
+
+      const tRespMs = Date.now() - tRespStart;
+      const tTotalMs = Date.now() - tStart;
+      console.log(
+        `[timing] total=${tTotalMs}ms load=${tLoadMs}ms embed=${tEmbedMs}ms sim=${tSimMs}ms respond=${tRespMs}ms records=${db.records?.length || 0}`
+      );
+      res.end();
+      return;
+    }
+
     const response = await client.responses.create({
       model: CHAT_MODEL,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. If the guidelines do not answer the question, say so and ask for clarification. Provide a concise recommendation and include a short Sources section listing the source numbers used."
-        },
-        {
-          role: "user",
-          content: `Guidelines context:\n\n${context}`
-        },
-        ...recent
-      ]
+      input
     });
+    const tRespMs = Date.now() - tRespStart;
 
     const outputText = response.output_text || "";
-    res.json({
-      answer: outputText
-    });
+    const tTotalMs = Date.now() - tStart;
+    console.log(
+      `[timing] total=${tTotalMs}ms load=${tLoadMs}ms embed=${tEmbedMs}ms sim=${tSimMs}ms respond=${tRespMs}ms records=${db.records?.length || 0}`
+    );
+    res.json({ answer: outputText });
   } catch (err) {
     console.error(err);
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
     res.status(500).json({ error: err.message || "Unknown error" });
   }
 });
