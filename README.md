@@ -43,3 +43,6 @@ Open `http://localhost:3000`.
 - The ingest step reads `bellevue_admitting_guidelines.pdf` in the project root and fetches the phone directory sheet (override with `CONTACTS_SHEET_URL`).
 - Embeddings are stored in `data/embeddings.json`.
 - If the PDF changes, re-run `npm run ingest`.
+
+## Interpretation guide
+- Maintain interpretation notes in `docs/admission-guidelines-interpretation.md` and update it alongside PDF changes (see the checklist in that guide).
