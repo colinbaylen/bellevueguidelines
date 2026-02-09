@@ -107,16 +107,30 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const tEmbedStart = Date.now();
+    const anchorQueries = [
+      "Medical Comorbidities list of diagnoses admitted to medicine regardless of primary admitting diagnosis"
+    ];
     const embed = await client.embeddings.create({
       model: db.model,
-      input: lastUser.content
+      input: [lastUser.content, ...anchorQueries]
     });
     const tEmbedMs = Date.now() - tEmbedStart;
 
     const tSimStart = Date.now();
     const top = topKSimilar(embed.data[0].embedding, db.records, 5);
+    const combined = new Map();
+    top.forEach((item) => combined.set(item.id, item));
+    anchorQueries.forEach((_, idx) => {
+      const anchorEmbedding = embed.data[idx + 1]?.embedding;
+      if (!anchorEmbedding) return;
+      const anchorTop = topKSimilar(anchorEmbedding, db.records, 2);
+      anchorTop.forEach((item) => {
+        if (!combined.has(item.id)) combined.set(item.id, item);
+      });
+    });
+    const merged = Array.from(combined.values());
     const tSimMs = Date.now() - tSimStart;
-    const context = top
+    const context = merged
       .map((t, i) => `[Source ${i + 1}]\n${t.text}`)
       .join("\n\n");
 
@@ -126,7 +140,7 @@ app.post("/api/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. If the guidelines do not answer the question, you MUST say: \"The guidelines do not provide a clear answer.\" Then briefly explain what is missing or ambiguous and, if possible, provide the best-supported interpretation(s) grounded in the guidelines. Do not ask the user to change or interpret the guidelines. Provide a concise recommendation and include a short Sources section listing the source numbers used."
+          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. You MUST check the Medical Comorbidities section; if any listed diagnosis is present, the admission service is Medicine regardless of the primary diagnosis. If the guidelines do not answer the question, you MUST say: \"The guidelines do not provide a clear answer.\" Then briefly explain what is missing or ambiguous and, if possible, provide the best-supported interpretation(s) grounded in the guidelines. Do not ask the user to change or interpret the guidelines. Provide a concise recommendation and include a short Sources section listing the source numbers used."
       },
       {
         role: "user",
