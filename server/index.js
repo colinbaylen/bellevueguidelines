@@ -6,7 +6,12 @@ import OpenAI from "openai";
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.resolve("./data/embeddings.json");
+const LOG_DIR = path.resolve("./data/logs");
+const ALL_QUERIES_LOG = path.resolve(LOG_DIR, "queries.jsonl");
+const AMBIGUOUS_LOG = path.resolve(LOG_DIR, "ambiguous.jsonl");
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
+const AMBIGUITY_SENTENCE = "The guidelines do not provide a clear answer.";
+const AMBIGUITY_REGEX = /the guidelines do not provide a clear answer\./i;
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.resolve("./public")));
@@ -46,6 +51,31 @@ function topKSimilar(queryEmbedding, records, k = 5) {
 function ensureOpenAIKey() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Missing OPENAI_API_KEY in environment.");
+  }
+}
+
+function ensureLogDir() {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
+}
+
+function appendLogLine(filePath, payload) {
+  ensureLogDir();
+  fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, "utf8");
+}
+
+function logQuery({ query, ambiguous, reason, pdfRefs }) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    query,
+    ambiguous: !!ambiguous
+  };
+  if (reason) entry.reason = reason;
+  if (Array.isArray(pdfRefs) && pdfRefs.length > 0) entry.pdf_refs = pdfRefs;
+  appendLogLine(ALL_QUERIES_LOG, entry);
+  if (entry.ambiguous) {
+    appendLogLine(AMBIGUOUS_LOG, entry);
   }
 }
 
@@ -96,7 +126,7 @@ app.post("/api/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. If the guidelines do not answer the question, say so and ask for clarification. Provide a concise recommendation and include a short Sources section listing the source numbers used."
+          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. If the guidelines do not answer the question, you MUST say: \"The guidelines do not provide a clear answer.\" Then briefly explain what is missing or ambiguous and, if possible, provide the best-supported interpretation(s) grounded in the guidelines. Do not ask the user to change or interpret the guidelines. Provide a concise recommendation and include a short Sources section listing the source numbers used."
       },
       {
         role: "user",
@@ -122,11 +152,20 @@ app.post("/api/chat", async (req, res) => {
         stream: true
       });
 
+      let streamedText = "";
       for await (const event of stream) {
         if (event.type === "response.output_text.delta" && event.delta) {
+          streamedText += event.delta;
           res.write(event.delta);
         }
       }
+
+      const ambiguous = AMBIGUITY_REGEX.test(streamedText);
+      logQuery({
+        query: lastUser.content,
+        ambiguous,
+        reason: ambiguous ? AMBIGUITY_SENTENCE : undefined
+      });
 
       const tRespMs = Date.now() - tRespStart;
       const tTotalMs = Date.now() - tStart;
@@ -144,6 +183,12 @@ app.post("/api/chat", async (req, res) => {
     const tRespMs = Date.now() - tRespStart;
 
     const outputText = response.output_text || "";
+    const ambiguous = AMBIGUITY_REGEX.test(outputText);
+    logQuery({
+      query: lastUser.content,
+      ambiguous,
+      reason: ambiguous ? AMBIGUITY_SENTENCE : undefined
+    });
     const tTotalMs = Date.now() - tStart;
     console.log(
       `[timing] total=${tTotalMs}ms load=${tLoadMs}ms embed=${tEmbedMs}ms sim=${tSimMs}ms respond=${tRespMs}ms records=${db.records?.length || 0}`
