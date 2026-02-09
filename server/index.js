@@ -9,6 +9,7 @@ const DATA_FILE = path.resolve("./data/embeddings.json");
 const LOG_DIR = path.resolve("./data/logs");
 const ALL_QUERIES_LOG = path.resolve(LOG_DIR, "queries.jsonl");
 const AMBIGUOUS_LOG = path.resolve(LOG_DIR, "ambiguous.jsonl");
+const FEEDBACK_LOG = path.resolve(LOG_DIR, "feedback.jsonl");
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const AMBIGUITY_SENTENCE = "The guidelines do not provide a clear answer.";
 const AMBIGUITY_REGEX = /the guidelines do not provide a clear answer\./i;
@@ -79,9 +80,21 @@ function logQuery({ query, ambiguous, reason, pdfRefs }) {
   }
 }
 
+function logFeedback(payload) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    ...payload
+  };
+  appendLogLine(FEEDBACK_LOG, entry);
+}
+
 app.get("/api/health", (_req, res) => {
   const ready = !!loadEmbeddings();
   res.json({ ok: true, embeddingsReady: ready });
+});
+
+app.get("/testing", (_req, res) => {
+  res.sendFile(path.resolve("./public/testing.html"));
 });
 
 app.post("/api/chat", async (req, res) => {
@@ -223,6 +236,19 @@ app.post("/api/reindex", async (_req, res) => {
   try {
     const reloaded = loadEmbeddings();
     res.json({ ok: true, count: reloaded?.count || 0 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/feedback", (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload || typeof payload !== "object") {
+      return res.status(400).json({ error: "feedback payload required" });
+    }
+    logFeedback(payload);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

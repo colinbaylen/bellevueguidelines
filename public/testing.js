@@ -2,8 +2,17 @@ const chatEl = document.getElementById("chat");
 const formEl = document.getElementById("composer");
 const inputEl = document.getElementById("input");
 const ghostEl = document.getElementById("ghost-text");
-const inlineSourceEl = document.getElementById("inline-source");
 const versionSwitchEl = document.getElementById("version-switch");
+const submitFeedbackEl = document.getElementById("feedback-submit");
+const feedbackStatusEl = document.getElementById("feedback-status");
+
+const scoreAccuracyEl = document.getElementById("score-accuracy");
+const scoreSafetyEl = document.getElementById("score-safety");
+const scoreUsefulnessEl = document.getElementById("score-usefulness");
+const scoreClarityEl = document.getElementById("score-clarity");
+const wouldUseEl = document.getElementById("would-use");
+const feedbackNotesEl = document.getElementById("feedback-notes");
+const tagInputs = Array.from(document.querySelectorAll(".tag-grid input[type='checkbox']"));
 
 const messages = [];
 let thinkingEl = null;
@@ -211,6 +220,72 @@ function startSuggestionRotation() {
   suggestionTimer = setInterval(rotateGhost, 4200);
 }
 
+function resetFeedbackForm() {
+  scoreAccuracyEl.value = "";
+  scoreSafetyEl.value = "";
+  scoreUsefulnessEl.value = "";
+  scoreClarityEl.value = "";
+  wouldUseEl.value = "";
+  feedbackNotesEl.value = "";
+  tagInputs.forEach((input) => {
+    input.checked = false;
+  });
+}
+
+async function submitFeedback() {
+  feedbackStatusEl.textContent = "";
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+
+  if (!lastUser || !lastAssistant) {
+    feedbackStatusEl.textContent = "Submit a prompt and response before sending feedback.";
+    feedbackStatusEl.className = "feedback-status warning";
+    return;
+  }
+
+  const tags = tagInputs.filter((input) => input.checked).map((input) => input.value);
+
+  const payload = {
+    view: "testing",
+    scores: {
+      accuracy: scoreAccuracyEl.value || null,
+      safety: scoreSafetyEl.value || null,
+      usefulness: scoreUsefulnessEl.value || null,
+      clarity: scoreClarityEl.value || null
+    },
+    would_use: wouldUseEl.value || null,
+    tags,
+    notes: feedbackNotesEl.value.trim() || null,
+    prompt: lastUser.content,
+    response: lastAssistant.content,
+    recent_messages: messages.slice(-6)
+  };
+
+  try {
+    submitFeedbackEl.disabled = true;
+    const res = await fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Request failed" }));
+      feedbackStatusEl.textContent = err.error || "Feedback failed.";
+      feedbackStatusEl.className = "feedback-status warning";
+      return;
+    }
+
+    feedbackStatusEl.textContent = "Feedback submitted. Thank you.";
+    feedbackStatusEl.className = "feedback-status success";
+    resetFeedbackForm();
+  } catch (err) {
+    feedbackStatusEl.textContent = "Network error while submitting feedback.";
+    feedbackStatusEl.className = "feedback-status warning";
+  } finally {
+    submitFeedbackEl.disabled = false;
+  }
+}
 
 formEl.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -299,5 +374,7 @@ inputEl.addEventListener("input", () => {
   }
 });
 
-startSuggestionRotation();
+submitFeedbackEl.addEventListener("click", submitFeedback);
+
 bindVersionSwitch();
+startSuggestionRotation();

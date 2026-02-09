@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Admitting Guidelines Assistant</title>
+    <title>Admitting Guidelines Assistant — Testing</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -11,22 +11,18 @@
       <header class="header">
         <div>
           <h1>Bellevue Admission Guidelines Assistant</h1>
-          <p>
-            This tool helps identify the primary admitting service based on the hospital’s
-            guidelines. The lists are not exhaustive and should be applied flexibly, with ED
-            evaluation, clinical judgment, and relevant comorbidities considered.
-          </p>
+          <p class="banner">Testing mode: de-identified cases only. Provide feedback after each response.</p>
         </div>
         <div class="header-actions">
           <label class="version-label" for="version-switch">Version</label>
           <select id="version-switch" class="version-switch">
-            <option value="beta" selected>Beta</option>
-            <option value="testing">Testing</option>
+            <option value="beta">Beta</option>
+            <option value="testing" selected>Testing</option>
           </select>
         </div>
       </header>
 
-      <section class="layout">
+      <section class="layout layout-testing">
         <section class="chat-panel">
           <section class="chat" id="chat"></section>
 
@@ -85,8 +81,90 @@
               </p>
             </details>
           </section>
-
         </section>
+
+        <aside class="feedback-panel">
+          <div class="feedback-card">
+            <div class="feedback-title">Response Feedback</div>
+            <p class="feedback-subtitle">Score the most recent response. Add notes if something is off.</p>
+
+            <div class="feedback-group">
+              <label for="score-accuracy">Accuracy / clinical soundness</label>
+              <select id="score-accuracy">
+                <option value="">Select</option>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+              </select>
+            </div>
+
+            <div class="feedback-group">
+              <label for="score-safety">Safety</label>
+              <select id="score-safety">
+                <option value="">Select</option>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+              </select>
+            </div>
+
+            <div class="feedback-group">
+              <label for="score-usefulness">Usefulness for ED workflow</label>
+              <select id="score-usefulness">
+                <option value="">Select</option>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+              </select>
+            </div>
+
+            <div class="feedback-group">
+              <label for="score-clarity">Clarity / conciseness</label>
+              <select id="score-clarity">
+                <option value="">Select</option>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+              </select>
+            </div>
+
+            <div class="feedback-group">
+              <label>Quick tags</label>
+              <div class="tag-grid">
+                <label class="tag"><input type="checkbox" value="unsafe" /> Unsafe</label>
+                <label class="tag"><input type="checkbox" value="needs-evidence" /> Needs evidence</label>
+                <label class="tag"><input type="checkbox" value="too-verbose" /> Too verbose</label>
+                <label class="tag"><input type="checkbox" value="missed-red-flags" /> Missed red flags</label>
+                <label class="tag"><input type="checkbox" value="helpful" /> Helpful</label>
+              </div>
+            </div>
+
+            <div class="feedback-group">
+              <label for="would-use">Would you use this response?</label>
+              <select id="would-use">
+                <option value="">Select</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+
+            <div class="feedback-group">
+              <label for="feedback-notes">Notes</label>
+              <textarea id="feedback-notes" rows="4" placeholder="What was missing or incorrect?"></textarea>
+            </div>
+
+            <button class="feedback-submit" id="feedback-submit" type="button">Submit feedback</button>
+            <div class="feedback-status" id="feedback-status" role="status"></div>
+          </div>
+        </aside>
       </section>
 
       <footer class="footer">
@@ -99,6 +177,6 @@
       </footer>
     </main>
 
-    <script src="/app.js"></script>
+    <script src="/testing.js"></script>
   </body>
 </html>
