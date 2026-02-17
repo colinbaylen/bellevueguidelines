@@ -1,15 +1,14 @@
 import fs from "fs";
 import path from "path";
-import pdfParse from "pdf-parse";
 import OpenAI from "openai";
 
-const SOURCE_PDF = path.resolve("./bellevue_admitting_guidelines.pdf");
+const SOURCE_MD = path.resolve("./docs/bellevue_admitting_guidelines.md");
 const OUT_FILE = path.resolve("./data/embeddings.json");
 const SHEET_URL =
   process.env.CONTACTS_SHEET_URL ||
   "https://docs.google.com/spreadsheets/d/1tqfNcfaLdLMZo6UHPH7ePoEFTKhNcp-wIGo1T3-i7fA/export?format=tsv";
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-large";
-const CHUNK_SIZE = 1000; // chars
+const CHUNK_SIZE = 1200; // chars
 const CHUNK_OVERLAP = 150; // chars
 const BATCH_SIZE = 96;
 
@@ -22,16 +21,80 @@ function normalize(text) {
     .trim();
 }
 
-function chunkText(text) {
+function splitSections(markdown) {
+  const lines = markdown.split(/\n/);
+  const sections = [];
+  let current = [];
+
+  const flush = () => {
+    if (!current.length) return;
+    sections.push(normalize(current.join("\n")));
+    current = [];
+  };
+
+  lines.forEach((line) => {
+    if (/^#{1,6}\s+/.test(line)) {
+      flush();
+      current.push(line.trim());
+      return;
+    }
+    current.push(line);
+  });
+
+  flush();
+  return sections.filter(Boolean);
+}
+
+function chunkSections(sections) {
   const chunks = [];
-  let i = 0;
-  while (i < text.length) {
-    const end = Math.min(i + CHUNK_SIZE, text.length);
-    const slice = text.slice(i, end);
-    chunks.push(slice);
-    if (end === text.length) break;
-    i = end - CHUNK_OVERLAP;
-  }
+  let buffer = "";
+
+  const flush = () => {
+    if (buffer.trim()) chunks.push(buffer.trim());
+    buffer = "";
+  };
+
+  sections.forEach((section) => {
+    if (!section) return;
+    if (section.length <= CHUNK_SIZE) {
+      if (!buffer) {
+        buffer = section;
+      } else if (buffer.length + 2 + section.length <= CHUNK_SIZE) {
+        buffer = `${buffer}\n\n${section}`;
+      } else {
+        flush();
+        buffer = section;
+      }
+      return;
+    }
+
+    flush();
+    const paragraphs = section.split(/\n{2,}/);
+    paragraphs.forEach((para) => {
+      const trimmed = para.trim();
+      if (!trimmed) return;
+      if (trimmed.length <= CHUNK_SIZE) {
+        if (!buffer) {
+          buffer = trimmed;
+        } else if (buffer.length + 2 + trimmed.length <= CHUNK_SIZE) {
+          buffer = `${buffer}\n\n${trimmed}`;
+        } else {
+          flush();
+          buffer = trimmed;
+        }
+      } else {
+        let i = 0;
+        while (i < trimmed.length) {
+          const end = Math.min(i + CHUNK_SIZE, trimmed.length);
+          chunks.push(trimmed.slice(i, end));
+          if (end === trimmed.length) break;
+          i = end - CHUNK_OVERLAP;
+        }
+      }
+    });
+  });
+
+  flush();
   return chunks;
 }
 
@@ -61,22 +124,22 @@ async function fetchSheetText() {
 async function main() {
   ensureOpenAIKey();
 
-  if (!fs.existsSync(SOURCE_PDF)) {
-    console.error(`PDF not found at ${SOURCE_PDF}`);
+  if (!fs.existsSync(SOURCE_MD)) {
+    console.error(`Markdown not found at ${SOURCE_MD}`);
     process.exit(1);
   }
 
-  const buffer = fs.readFileSync(SOURCE_PDF);
-  const parsed = await pdfParse(buffer);
-  const text = normalize(parsed.text || "");
+  const rawMarkdown = fs.readFileSync(SOURCE_MD, "utf8");
+  const text = normalize(rawMarkdown || "");
   if (!text) {
-    console.error("No text extracted from PDF.");
+    console.error("No text found in markdown file.");
     process.exit(1);
   }
 
   const sheetText = await fetchSheetText();
   const combined = [text, sheetText].join("\n\n");
-  const chunks = chunkText(combined);
+  const sections = splitSections(combined);
+  const chunks = chunkSections(sections);
   const client = new OpenAI();
   const records = [];
 
@@ -100,7 +163,7 @@ async function main() {
   }
 
   const payload = {
-    source: path.basename(SOURCE_PDF),
+    source: path.basename(SOURCE_MD),
     model: EMBEDDING_MODEL,
     createdAt: new Date().toISOString(),
     count: records.length,

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import express from "express";
 import OpenAI from "openai";
 
@@ -13,6 +14,9 @@ const FEEDBACK_LOG = path.resolve(LOG_DIR, "feedback.jsonl");
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const AMBIGUITY_SENTENCE = "The guidelines do not provide a clear answer.";
 const AMBIGUITY_REGEX = /the guidelines do not provide a clear answer\./i;
+const SOURCES_TTL_MS = 10 * 60 * 1000;
+const sourcesCache = new Map();
+const SOURCE_MD = path.resolve("./docs/bellevue_admitting_guidelines.md");
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.resolve("./public")));
@@ -24,6 +28,111 @@ function loadEmbeddings() {
   const raw = fs.readFileSync(DATA_FILE, "utf8");
   embeddingsCache = JSON.parse(raw);
   return embeddingsCache;
+}
+
+function extractChunkNumber(id) {
+  const match = /chunk-(\d+)/i.exec(id || "");
+  return match ? Number(match[1]) : null;
+}
+
+function isHeadingLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("●") || trimmed.startsWith("-") || trimmed.startsWith("*")) return false;
+  if (/[.!?]$/.test(trimmed)) return false;
+  if (trimmed.length < 3 || trimmed.length > 80) return false;
+  if (!/[A-Za-z]/.test(trimmed)) return false;
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount > 12) return false;
+  return true;
+}
+
+function buildTextIndex(records) {
+  const ordered = [...records].sort((a, b) => {
+    const na = extractChunkNumber(a.id) ?? Number.MAX_SAFE_INTEGER;
+    const nb = extractChunkNumber(b.id) ?? Number.MAX_SAFE_INTEGER;
+    if (na === nb) return 0;
+    return na - nb;
+  });
+
+  const chunkPositions = new Map();
+  let cursor = 0;
+  const parts = [];
+
+  ordered.forEach((record, idx) => {
+    const text = record.text || "";
+    chunkPositions.set(record.id, { start: cursor, end: cursor + text.length });
+    parts.push(text);
+    cursor += text.length;
+    if (idx < ordered.length - 1) {
+      parts.push("\n");
+      cursor += 1;
+    }
+  });
+
+  const fullText = parts.join("");
+  const headings = [];
+  let lineStart = 0;
+  const lines = fullText.split("\n");
+  lines.forEach((line) => {
+    if (isHeadingLine(line)) {
+      headings.push({ start: lineStart, text: line.trim() });
+    }
+    lineStart += line.length + 1;
+  });
+
+  return { fullText, headings, chunkPositions };
+}
+
+function extractSectionFromMarkdown(markdown, heading) {
+  const lines = markdown.split(/\n/);
+  const headingRegex = new RegExp(`^#{1,6}\\s+${heading}\\s*$`, "i");
+  const nextHeadingRegex = /^#{1,6}\s+/;
+  let inSection = false;
+  const sectionLines = [];
+
+  for (const line of lines) {
+    if (headingRegex.test(line.trim())) {
+      inSection = true;
+      sectionLines.push(line.trim());
+      continue;
+    }
+    if (inSection && nextHeadingRegex.test(line.trim())) {
+      break;
+    }
+    if (inSection) sectionLines.push(line);
+  }
+
+  return sectionLines.join("\n").trim();
+}
+
+function buildSourceText(item, index) {
+  const pos = index.chunkPositions.get(item.id);
+  if (!pos) return item?.text || "";
+  const { fullText, headings } = index;
+  const chunkStart = pos.start;
+  const chunkEnd = pos.end;
+
+  let sectionStart = 0;
+  let sectionEnd = fullText.length;
+
+  for (let i = headings.length - 1; i >= 0; i -= 1) {
+    if (headings[i].start <= chunkStart) {
+      sectionStart = headings[i].start;
+      break;
+    }
+  }
+
+  for (let i = 0; i < headings.length; i += 1) {
+    if (headings[i].start > chunkEnd) {
+      sectionEnd = headings[i].start;
+      break;
+    }
+  }
+
+  const section = fullText.slice(sectionStart, sectionEnd).trim();
+  if (section.length <= 6000) return section;
+  return section.slice(0, 6000);
 }
 
 function cosineSimilarity(a, b) {
@@ -88,6 +197,16 @@ function logFeedback(payload) {
   appendLogLine(FEEDBACK_LOG, entry);
 }
 
+function storeSources(sources) {
+  const id = crypto.randomUUID();
+  const expiresAt = Date.now() + SOURCES_TTL_MS;
+  sourcesCache.set(id, { sources, expiresAt });
+  setTimeout(() => {
+    sourcesCache.delete(id);
+  }, SOURCES_TTL_MS);
+  return id;
+}
+
 app.get("/api/health", (_req, res) => {
   const ready = !!loadEmbeddings();
   res.json({ ok: true, embeddingsReady: ready });
@@ -142,6 +261,12 @@ app.post("/api/chat", async (req, res) => {
       });
     });
     const merged = Array.from(combined.values());
+    const textIndex = buildTextIndex(db.records);
+    const sources = merged.map((item, index) => ({
+      id: index + 1,
+      text: buildSourceText(item, textIndex)
+    }));
+    const sourcesId = storeSources(sources);
     const tSimMs = Date.now() - tSimStart;
     const context = merged
       .map((t, i) => `[Source ${i + 1}]\n${t.text}`)
@@ -153,7 +278,7 @@ app.post("/api/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. You MUST check the Medical Comorbidities section; if any listed diagnosis is present, the admission service is Medicine regardless of the primary diagnosis. If the guidelines do not answer the question, you MUST say: \"The guidelines do not provide a clear answer.\" Then briefly explain what is missing or ambiguous and, if possible, provide the best-supported interpretation(s) grounded in the guidelines. Do not ask the user to change or interpret the guidelines. Provide a concise recommendation and include a short Sources section listing the source numbers used."
+          "You are an ER admitting guidelines assistant. Answer questions using ONLY the provided guidelines context. You MUST check the Medical Comorbidities section; if any listed diagnosis is present, the admission service is Medicine regardless of the primary diagnosis. If the guidelines do not answer the question, you MUST say: \"The guidelines do not provide a clear answer.\" Then briefly explain what is missing or ambiguous and, if possible, provide the best-supported interpretation(s) grounded in the guidelines. Do not ask the user to change or interpret the guidelines. Provide a concise recommendation. Add inline citations in the form [Source N] immediately after the sentence they support. Do not add a Sources section. The final line of your response MUST be: \"If any diagnosis on the Medical Comorbidities list is present, admit to Medicine regardless of primary diagnosis.\""
       },
       {
         role: "user",
@@ -168,6 +293,7 @@ app.post("/api/chat", async (req, res) => {
       (typeof req.headers.accept === "string" && req.headers.accept.includes("text/plain"));
 
     if (wantsStream) {
+      res.setHeader("X-Sources-Id", sourcesId);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("Connection", "keep-alive");
@@ -220,6 +346,7 @@ app.post("/api/chat", async (req, res) => {
     console.log(
       `[timing] total=${tTotalMs}ms load=${tLoadMs}ms embed=${tEmbedMs}ms sim=${tSimMs}ms respond=${tRespMs}ms records=${db.records?.length || 0}`
     );
+    res.setHeader("X-Sources-Id", sourcesId);
     res.json({ answer: outputText });
   } catch (err) {
     console.error(err);
@@ -228,6 +355,31 @@ app.post("/api/chat", async (req, res) => {
       return;
     }
     res.status(500).json({ error: err.message || "Unknown error" });
+  }
+});
+
+app.get("/api/sources/:id", (req, res) => {
+  const entry = sourcesCache.get(req.params.id);
+  if (!entry || entry.expiresAt < Date.now()) {
+    if (entry) sourcesCache.delete(req.params.id);
+    return res.status(404).json({ error: "Sources not found" });
+  }
+  return res.json({ sources: entry.sources });
+});
+
+app.get("/api/medical-comorbidities", (req, res) => {
+  try {
+    if (!fs.existsSync(SOURCE_MD)) {
+      return res.status(404).json({ error: "Markdown not found" });
+    }
+    const markdown = fs.readFileSync(SOURCE_MD, "utf8");
+    const section = extractSectionFromMarkdown(markdown, "Medical Comorbidities");
+    if (!section) {
+      return res.status(404).json({ error: "Section not found" });
+    }
+    return res.json({ section });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Unknown error" });
   }
 });
 

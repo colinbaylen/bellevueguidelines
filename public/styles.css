@@ -137,6 +137,12 @@ body {
   justify-content: flex-end;
 }
 
+.message.assistant {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .bubble {
   padding: 12px 16px;
   border-radius: 16px;
@@ -174,7 +180,143 @@ body {
   margin: 6px 0 4px;
 }
 
+.message.assistant .bubble .heading-with-list {
+  margin-bottom: 8px;
+}
+
+.message.assistant .bubble .heading-with-list + ul {
+  margin-top: 0;
+}
+
+.message.assistant .bubble .source-sup {
+  font-size: 10px;
+  vertical-align: super;
+  margin-left: 2px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .message.assistant .bubble .spacer {
+  height: 6px;
+}
+
+.sources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #232a39;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 75%;
+}
+
+.sources-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 6px;
+}
+
+.sources-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.inline-caveat-link {
+  color: #9ec2ff;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.inline-caveat-link:hover {
+  color: #c3d9ff;
+}
+
+.source-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 10, 16, 0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 999;
+}
+
+.source-modal.is-visible {
+  display: flex;
+}
+
+.source-modal-content {
+  background: #141a27;
+  border: 1px solid #293246;
+  border-radius: 18px;
+  padding: 18px;
+  max-width: 720px;
+  width: 100%;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+}
+
+.source-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.source-modal-close {
+  border: 1px solid #2a3140;
+  background: #1e2a3f;
+  color: var(--ink);
+  border-radius: 10px;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.source-modal-body {
+  background: #0f141f;
+  border: 1px solid #232a39;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-height: 55vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.source-modal-body .heading {
+  font-weight: 600;
+  margin: 6px 0 4px;
+}
+
+.source-modal-body ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+
+.source-modal-body li {
+  margin: 6px 0;
+}
+
+.source-modal-body .spacer {
   height: 6px;
 }
 
